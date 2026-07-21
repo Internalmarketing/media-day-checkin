@@ -18,7 +18,7 @@ const CONFIG = {
 
   // Apps Script: Deploy > New deployment > Web app > Execute as Me,
   // Who has access: Anyone. Paste the resulting /exec URL here.
-  APPS_SCRIPT_URL: "https://script.google.com/macros/s/AKfycbx1MgMjigKjfyYvCwqumsaZx8GJe24y8kheLyUQ47ud205n3xyq4Ij3LhuSuMKwc0HF/exec",
+  APPS_SCRIPT_URL: "https://script.google.com/macros/s/AKfycbxE_tUzhRs5guvnKAWhQZi-hIB20g6BGQIFktP13PIEPweYKjUaEJtWAs8BK8AgNbCU/exec",
 
   // Must match CHECKIN_CONFIG.sharedSecret in Code.gs exactly.
   SHARED_SECRET: "mediaday-x7q2-lock",
@@ -474,13 +474,25 @@ async function toggleCheckin(row){
       headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // avoids a CORS preflight
       body: JSON.stringify({ row, action, secret: CONFIG.SHARED_SECRET })
     });
-    const data = await res.json();
+
+    // Read as text first — if the deployment/auth is misconfigured, Apps
+    // Script can return an HTML sign-in page instead of JSON, and .json()
+    // would just throw "Unexpected token <" with no useful detail.
+    const raw = await res.text();
+    let data;
+    try{
+      data = JSON.parse(raw);
+    }catch(parseErr){
+      throw new Error(`Server didn't return JSON (HTTP ${res.status}). This usually means the Web App needs redeploying, or "Who has access" isn't set to Anyone. Response started with: "${raw.slice(0, 80).replace(/\s+/g, ' ')}"`);
+    }
+
     if (!data.ok) throw new Error(data.error || 'unknown error');
 
     a.checkedIn = data.checkedIn;
     if (CONFIG.NTFY_TOPIC) publishNtfy(action, a);
   }catch(err){
-    showBanner(`Couldn't update the sheet (${err.message}). Try again.`);
+    console.error('Check-in failed:', err);
+    showBanner(`Couldn't update the sheet: ${err.message}`);
   }finally{
     busyRows.delete(row);
     render();
