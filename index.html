@@ -86,10 +86,53 @@ const CONFIG = {
     color:var(--ink);
   }
   .search:focus{outline:2px solid var(--gold);}
-  .chips{
-    display:flex; gap:8px; flex-wrap:wrap;
-    margin-top:12px;
+
+  .filter-toggle{
+    width:100%;
+    display:flex; align-items:center; justify-content:space-between;
+    gap:10px;
+    margin-top:10px;
+    padding:9px 14px;
+    border-radius:8px;
+    border:1px solid rgba(255,255,255,.25);
+    background:rgba(255,255,255,.06);
+    color:var(--paper);
+    font-family:'Inter',sans-serif;
+    font-size:13px;
+    font-weight:600;
+    cursor:pointer;
   }
+  .filter-toggle .fsummary{
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    color:var(--paper); opacity:.9;
+  }
+  .filter-toggle .fchevron{
+    flex-shrink:0;
+    transition:transform .15s ease;
+    opacity:.7;
+    font-size:11px;
+  }
+  .filter-toggle.open .fchevron{transform:rotate(180deg);}
+
+  .filter-panel{
+    max-height:0;
+    overflow:hidden;
+    transition:max-height .18s ease;
+  }
+  .filter-panel.open{
+    max-height:140px;
+    margin-top:10px;
+  }
+
+  .chips{
+    display:flex; gap:8px; flex-wrap:nowrap;
+    overflow-x:auto;
+    -webkit-overflow-scrolling:touch;
+    scrollbar-width:none;
+    padding-bottom:4px;
+  }
+  .chips::-webkit-scrollbar{display:none;}
+  .chips + .chips{margin-top:8px;}
   .chip{
     font-family:'Inter',sans-serif;
     font-weight:600;
@@ -100,6 +143,8 @@ const CONFIG = {
     background:transparent;
     color:var(--paper);
     cursor:pointer;
+    flex-shrink:0;
+    white-space:nowrap;
   }
   .chip.active{
     background:var(--gold);
@@ -233,8 +278,14 @@ const CONFIG = {
   <h1 id="eventName">Event Check-In</h1>
   <div class="stats"><span class="count" id="countText">0 / 0</span>&nbsp;checked in</div>
   <input class="search" id="search" type="text" placeholder="Search name, team, or details…" autocomplete="off" />
-  <div class="chips" id="teamChips"></div>
-  <div class="chips" id="roundChips" style="margin-top:8px;"></div>
+  <button class="filter-toggle" id="filterToggleBtn" type="button">
+    <span class="fsummary" id="filterSummary">All teams · All times</span>
+    <span class="fchevron" id="filterChevron">▾</span>
+  </button>
+  <div class="filter-panel" id="filterPanel">
+    <div class="chips" id="teamChips"></div>
+    <div class="chips" id="roundChips"></div>
+  </div>
 </div>
 
 <main>
@@ -312,6 +363,7 @@ function highlightChips(){
     const isAll = c.textContent === 'All teams';
     c.classList.toggle('active', isAll ? activeTeam === null : c.textContent === activeTeam);
   });
+  updateFilterSummary();
 }
 
 function buildRoundChips(){
@@ -332,13 +384,29 @@ function buildRoundChips(){
     chip.onclick = () => { activeRound = r; render(); highlightRoundChips(); };
     wrap.appendChild(chip);
   });
+  updateFilterSummary();
 }
 function highlightRoundChips(){
   [...document.getElementById('roundChips').children].forEach(c => {
     const isAll = c.textContent === 'All times';
     c.classList.toggle('active', isAll ? activeRound === null : c.textContent === activeRound);
   });
+  updateFilterSummary();
 }
+
+/* ---------- compact filter bar ---------- */
+function updateFilterSummary(){
+  const teamText = activeTeam || 'All teams';
+  const roundText = activeRound || 'All times';
+  document.getElementById('filterSummary').textContent = `${teamText} · ${roundText}`;
+}
+
+const filterToggleBtn = document.getElementById('filterToggleBtn');
+const filterPanel = document.getElementById('filterPanel');
+filterToggleBtn.addEventListener('click', () => {
+  const isOpen = filterPanel.classList.toggle('open');
+  filterToggleBtn.classList.toggle('open', isOpen);
+});
 
 /* ---------- render ---------- */
 function render(){
@@ -442,6 +510,23 @@ document.getElementById('search').addEventListener('input', (e) => {
 
 loadAttendees(false);
 setInterval(() => loadAttendees(true), CONFIG.POLL_MS);
+
+// Also refresh the moment the tab/app comes back to the foreground —
+// e.g. phone unlocked, or switching back from another app — so the
+// list doesn't sit stale until the next scheduled poll.
+let lastFocusRefresh = 0;
+function refreshOnReturn(){
+  const now = Date.now();
+  if (now - lastFocusRefresh < 2000) return; // avoid double-firing
+  lastFocusRefresh = now;
+  loadAttendees(true);
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') refreshOnReturn();
+});
+window.addEventListener('focus', refreshOnReturn);
+window.addEventListener('pageshow', refreshOnReturn);
+
 </script>
 </body>
 </html>
