@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Event Check-In</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<script>
+/* ==================================================================
+   CONFIG — the only block you need to touch
+   ================================================================== */
+const CONFIG = {
+  EVENT_NAME: "Media Day",
+
+  // Apps Script: Deploy > New deployment > Web app > Execute as Me,
+  // Who has access: Anyone. Paste the resulting /exec URL here.
+  APPS_SCRIPT_URL: "https://script.google.com/macros/s/PASTE-YOUR-DEPLOYMENT-ID/exec",
+
+  // Must match CHECKIN_CONFIG.sharedSecret in Code.gs exactly.
+  SHARED_SECRET: "change-me-to-a-long-random-string",
+
+  // Optional: ntfy topic for a push alert on every check-in.
+  // Leave NTFY_TOPIC empty ("") to disable alerts entirely.
+  NTFY_TOPIC: "your-event-checkin-topic-change-me",
+  NTFY_SERVER: "https://ntfy.sh",
+
+  // How often to re-pull the sheet so other devices' check-ins show up.
+  POLL_MS: 8000
+};
+</script>
+
+<style>
+  :root{
+    --ink:#1c2b33;
+    --ink-soft:#33454f;
+    --paper:#f7f3ea;
+    --paper-card:#fffdf8;
+    --gold:#c9a227;
+    --go:#3f7d58;
+    --muted:#9a8f72;
+    --line:#d8cfba;
+    --shadow: 0 1px 0 rgba(28,43,51,.06);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--paper);
+    color:var(--ink);
+    font-family:'Inter',system-ui,sans-serif;
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+  .topbar{
+    background:var(--ink);
+    color:var(--paper);
+    padding:20px 20px 24px;
+    position:sticky; top:0; z-index:10;
+    box-shadow:0 4px 12px rgba(0,0,0,.15);
+  }
+  .topbar h1{
+    font-family:'Big Shoulders Display',sans-serif;
+    font-weight:800;
+    font-size:clamp(28px,6vw,38px);
+    letter-spacing:.5px;
+    margin:0 0 2px;
+    text-transform:uppercase;
+  }
+  .stats{
+    font-family:'Big Shoulders Display',sans-serif;
+    font-weight:600;
+    font-size:15px;
+    letter-spacing:1px;
+    color:var(--gold);
+    text-transform:uppercase;
+    margin-bottom:14px;
+  }
+  .stats span.count{color:#fff;}
+  .search{
+    width:100%;
+    padding:12px 14px;
+    border-radius:8px;
+    border:none;
+    font-family:'Inter',sans-serif;
+    font-size:16px;
+    background:rgba(255,255,255,.95);
+    color:var(--ink);
+  }
+  .search:focus{outline:2px solid var(--gold);}
+  .chips{
+    display:flex; gap:8px; flex-wrap:wrap;
+    margin-top:12px;
+  }
+  .chip{
+    font-family:'Big Shoulders Display',sans-serif;
+    font-weight:700;
+    font-size:13px;
+    letter-spacing:.5px;
+    text-transform:uppercase;
+    padding:6px 12px;
+    border-radius:20px;
+    border:1px solid rgba(255,255,255,.35);
+    background:transparent;
+    color:var(--paper);
+    cursor:pointer;
+  }
+  .chip.active{
+    background:var(--gold);
+    border-color:var(--gold);
+    color:var(--ink);
+  }
+  main{
+    max-width:720px;
+    margin:0 auto;
+    padding:18px 14px 60px;
+  }
+  .empty{
+    text-align:center;
+    color:var(--ink-soft);
+    padding:60px 20px;
+    font-size:15px;
+  }
+  .card{
+    position:relative;
+    display:flex;
+    align-items:center;
+    gap:14px;
+    background:var(--paper-card);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:14px 16px;
+    margin-bottom:10px;
+    box-shadow:var(--shadow);
+    overflow:hidden;
+    cursor:pointer;
+    -webkit-tap-highlight-color:transparent;
+    transition:transform .08s ease, opacity .15s ease;
+  }
+  .card:active{transform:scale(.99);}
+  .card.busy{opacity:.5; pointer-events:none;}
+  .card::before{
+    content:"";
+    position:absolute;
+    left:0; top:0; bottom:0;
+    width:5px;
+    background:var(--gold);
+  }
+  .card.checked::before{background:var(--go);}
+  .card-body{flex:1; min-width:0;}
+  .card-top-row{display:flex; align-items:center; gap:8px;}
+  .card-team{
+    font-family:'Big Shoulders Display',sans-serif;
+    font-weight:700;
+    font-size:12px;
+    letter-spacing:1px;
+    text-transform:uppercase;
+    color:var(--gold);
+  }
+  .tag-norsvp{
+    font-size:10px;
+    font-weight:700;
+    letter-spacing:.5px;
+    text-transform:uppercase;
+    color:#a3512b;
+    background:#fbe3d3;
+    padding:2px 6px;
+    border-radius:4px;
+  }
+  .card-name{
+    font-size:18px;
+    font-weight:600;
+    margin:2px 0 2px;
+    color:var(--ink);
+    overflow-wrap:anywhere;
+  }
+  .card-details{
+    font-size:13px;
+    color:var(--ink-soft);
+    overflow-wrap:anywhere;
+  }
+  .card-meta{
+    font-size:12px;
+    color:var(--muted);
+    margin-top:2px;
+  }
+  .stamp{
+    font-family:'Big Shoulders Display',sans-serif;
+    font-weight:800;
+    font-size:12px;
+    letter-spacing:1px;
+    text-transform:uppercase;
+    color:#fff;
+    background:var(--go);
+    padding:6px 10px;
+    border-radius:6px;
+    transform:rotate(-4deg);
+    white-space:nowrap;
+    flex-shrink:0;
+  }
+  .btn-in{
+    font-family:'Big Shoulders Display',sans-serif;
+    font-weight:700;
+    font-size:13px;
+    letter-spacing:.5px;
+    text-transform:uppercase;
+    color:var(--ink);
+    background:transparent;
+    border:1.5px dashed var(--ink-soft);
+    padding:7px 12px;
+    border-radius:6px;
+    flex-shrink:0;
+  }
+  .status-dot{
+    position:fixed; bottom:14px; right:14px;
+    font-family:'Inter',sans-serif;
+    font-size:11px;
+    color:var(--ink-soft);
+    background:var(--paper-card);
+    border:1px solid var(--line);
+    padding:5px 10px;
+    border-radius:20px;
+    display:flex; align-items:center; gap:6px;
+  }
+  .dot{width:7px;height:7px;border-radius:50%;background:#bbb;}
+  .dot.live{background:var(--go);}
+  .dot.err{background:#b23a2e;}
+  .banner{
+    background:#fdecea; color:#b23a2e;
+    border:1px solid #f3c8c3;
+    border-radius:8px;
+    padding:10px 14px;
+    margin-bottom:14px;
+    font-size:13px;
+  }
+</style>
+
+<div class="topbar">
+  <h1 id="eventName">Event Check-In</h1>
+  <div class="stats"><span class="count" id="countText">0 / 0</span>&nbsp;checked in</div>
+  <input class="search" id="search" type="text" placeholder="Search name, team, or details…" autocomplete="off" />
+  <div class="chips" id="teamChips"></div>
+</div>
+
+<main>
+  <div id="banner"></div>
+  <div id="list"></div>
+</main>
+
+<div class="status-dot"><span class="dot" id="liveDot"></span><span id="liveText">loading…</span></div>
+
+<script>
+document.getElementById('eventName').textContent = CONFIG.EVENT_NAME;
+document.title = CONFIG.EVENT_NAME;
+
+let attendees = [];   // from the Sheet, refreshed on load + poll
+let activeTeam = null;
+let searchTerm = "";
+let busyRows = new Set();
+
+function showBanner(msg){
+  document.getElementById('banner').innerHTML = msg ? `<div class="banner">${msg}</div>` : '';
+}
+function setLive(state, text){
+  const dot = document.getElementById('liveDot');
+  dot.classList.toggle('live', state === 'ok');
+  dot.classList.toggle('err', state === 'err');
+  document.getElementById('liveText').textContent = text;
+}
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+
+/* ---------- load from Sheet ---------- */
+async function loadAttendees(silent){
+  try{
+    const res = await fetch(CONFIG.APPS_SCRIPT_URL, { method: 'GET' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    attendees = data.attendees || [];
+    showBanner('');
+    setLive('ok', 'synced');
+    buildTeamChips();
+    render();
+  }catch(err){
+    setLive('err', 'sync failed');
+    if (!silent){
+      showBanner("Couldn't reach the Sheet. Check CONFIG.APPS_SCRIPT_URL and that the Web App is deployed with access set to Anyone.");
+    }
+  }
+}
+
+function buildTeamChips(){
+  const teams = [...new Set(attendees.map(a => a.team).filter(Boolean))].sort();
+  const wrap = document.getElementById('teamChips');
+  const prevActive = activeTeam;
+  wrap.innerHTML = '';
+  const all = document.createElement('button');
+  all.className = 'chip' + (prevActive === null ? ' active' : '');
+  all.textContent = 'All teams';
+  all.onclick = () => { activeTeam = null; render(); highlightChips(); };
+  wrap.appendChild(all);
+  teams.forEach(t => {
+    const chip = document.createElement('button');
+    chip.className = 'chip' + (t === prevActive ? ' active' : '');
+    chip.textContent = t;
+    chip.onclick = () => { activeTeam = t; render(); highlightChips(); };
+    wrap.appendChild(chip);
+  });
+}
+function highlightChips(){
+  [...document.getElementById('teamChips').children].forEach(c => {
+    const isAll = c.textContent === 'All teams';
+    c.classList.toggle('active', isAll ? activeTeam === null : c.textContent === activeTeam);
+  });
+}
+
+/* ---------- render ---------- */
+function render(){
+  const list = document.getElementById('list');
+  const q = searchTerm.trim().toLowerCase();
+
+  const filtered = attendees.filter(a => {
+    if (activeTeam && a.team !== activeTeam) return false;
+    if (!q) return true;
+    return a.name.toLowerCase().includes(q)
+        || a.team.toLowerCase().includes(q)
+        || a.details.toLowerCase().includes(q);
+  });
+
+  const checkedCount = attendees.filter(a => a.checkedIn).length;
+  document.getElementById('countText').textContent = `${checkedCount} / ${attendees.length}`;
+
+  if (!filtered.length){
+    list.innerHTML = `<div class="empty">No one matches "${escapeHtml(q)}". Try a different search or team.</div>`;
+    return;
+  }
+
+  list.innerHTML = filtered.map(a => {
+    const busy = busyRows.has(a.row);
+    return `
+      <div class="card ${a.checkedIn ? 'checked' : ''} ${busy ? 'busy' : ''}" data-row="${a.row}">
+        <div class="card-body">
+          <div class="card-top-row">
+            <div class="card-team">${escapeHtml(a.team)}</div>
+            ${a.rsvp ? '' : '<span class="tag-norsvp">No RSVP</span>'}
+          </div>
+          <div class="card-name">${escapeHtml(a.name)}</div>
+          ${a.details ? `<div class="card-details">${escapeHtml(a.details)}</div>` : ''}
+          ${(a.round || a.pax) ? `<div class="card-meta">${escapeHtml(a.round || '')}${a.round && a.pax ? ' · ' : ''}${a.pax ? 'Pax ' + escapeHtml(a.pax) : ''}</div>` : ''}
+        </div>
+        ${a.checkedIn
+          ? `<div class="stamp">Checked in</div>`
+          : `<div class="btn-in">Check in</div>`}
+      </div>`;
+  }).join('');
+
+  [...list.querySelectorAll('.card')].forEach(card => {
+    card.addEventListener('click', () => toggleCheckin(Number(card.dataset.row)));
+  });
+}
+
+/* ---------- check-in / check-out ---------- */
+async function toggleCheckin(row){
+  const a = attendees.find(x => x.row === row);
+  if (!a || busyRows.has(row)) return;
+
+  const action = a.checkedIn ? 'out' : 'in';
+  busyRows.add(row);
+  render();
+
+  try{
+    const res = await fetch(CONFIG.APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // avoids a CORS preflight
+      body: JSON.stringify({ row, action, secret: CONFIG.SHARED_SECRET })
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'unknown error');
+
+    a.checkedIn = data.checkedIn;
+    if (CONFIG.NTFY_TOPIC) publishNtfy(action, a);
+  }catch(err){
+    showBanner(`Couldn't update the sheet (${err.message}). Try again.`);
+  }finally{
+    busyRows.delete(row);
+    render();
+  }
+}
+
+function publishNtfy(action, a){
+  const verb = action === 'in' ? 'checked in ✅' : 'checked out ↩️';
+  const title = action === 'in' ? `Check-in: ${CONFIG.EVENT_NAME}` : `Check-out: ${CONFIG.EVENT_NAME}`;
+  const body = `${a.name} (${a.team}) ${verb}`;
+  fetch(`${CONFIG.NTFY_SERVER}/${CONFIG.NTFY_TOPIC}`, {
+    method: 'POST',
+    body,
+    headers: {
+      'Title': title,
+      'Priority': action === 'in' ? 'default' : 'low',
+      'Tags': action === 'in' ? 'white_check_mark' : 'leftwards_arrow_with_hook'
+    }
+  }).catch(() => { /* alert is best-effort; the check-in itself already succeeded */ });
+}
+
+/* ---------- wire up ---------- */
+document.getElementById('search').addEventListener('input', (e) => {
+  searchTerm = e.target.value;
+  render();
+});
+
+loadAttendees(false);
+setInterval(() => loadAttendees(true), CONFIG.POLL_MS);
+</script>
+</body>
+</html>
