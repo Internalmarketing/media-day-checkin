@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
 <title>Event Check-In</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 </head>
 <body>
 
@@ -62,20 +62,16 @@ const CONFIG = {
     box-shadow:0 4px 12px rgba(0,0,0,.15);
   }
   .topbar h1{
-    font-family:'Big Shoulders Display',sans-serif;
-    font-weight:800;
-    font-size:clamp(28px,6vw,38px);
-    letter-spacing:.5px;
-    margin:0 0 2px;
-    text-transform:uppercase;
+    font-family:'Inter',sans-serif;
+    font-weight:700;
+    font-size:clamp(24px,5vw,30px);
+    margin:0 0 4px;
   }
   .stats{
-    font-family:'Big Shoulders Display',sans-serif;
+    font-family:'Inter',sans-serif;
     font-weight:600;
-    font-size:15px;
-    letter-spacing:1px;
+    font-size:14px;
     color:var(--gold);
-    text-transform:uppercase;
     margin-bottom:14px;
   }
   .stats span.count{color:#fff;}
@@ -95,11 +91,9 @@ const CONFIG = {
     margin-top:12px;
   }
   .chip{
-    font-family:'Big Shoulders Display',sans-serif;
-    font-weight:700;
+    font-family:'Inter',sans-serif;
+    font-weight:600;
     font-size:13px;
-    letter-spacing:.5px;
-    text-transform:uppercase;
     padding:6px 12px;
     border-radius:20px;
     border:1px solid rgba(255,255,255,.35);
@@ -152,10 +146,10 @@ const CONFIG = {
   .card-body{flex:1; min-width:0;}
   .card-top-row{display:flex; align-items:center; gap:8px;}
   .card-team{
-    font-family:'Big Shoulders Display',sans-serif;
+    font-family:'Inter',sans-serif;
     font-weight:700;
     font-size:12px;
-    letter-spacing:1px;
+    letter-spacing:.3px;
     text-transform:uppercase;
     color:var(--gold);
   }
@@ -187,10 +181,10 @@ const CONFIG = {
     margin-top:2px;
   }
   .stamp{
-    font-family:'Big Shoulders Display',sans-serif;
-    font-weight:800;
+    font-family:'Inter',sans-serif;
+    font-weight:700;
     font-size:12px;
-    letter-spacing:1px;
+    letter-spacing:.3px;
     text-transform:uppercase;
     color:#fff;
     background:var(--go);
@@ -201,11 +195,9 @@ const CONFIG = {
     flex-shrink:0;
   }
   .btn-in{
-    font-family:'Big Shoulders Display',sans-serif;
-    font-weight:700;
+    font-family:'Inter',sans-serif;
+    font-weight:600;
     font-size:13px;
-    letter-spacing:.5px;
-    text-transform:uppercase;
     color:var(--ink);
     background:transparent;
     border:1.5px dashed var(--ink-soft);
@@ -242,6 +234,7 @@ const CONFIG = {
   <div class="stats"><span class="count" id="countText">0 / 0</span>&nbsp;checked in</div>
   <input class="search" id="search" type="text" placeholder="Search name, team, or details…" autocomplete="off" />
   <div class="chips" id="teamChips"></div>
+  <div class="chips" id="roundChips" style="margin-top:8px;"></div>
 </div>
 
 <main>
@@ -257,6 +250,7 @@ document.title = CONFIG.EVENT_NAME;
 
 let attendees = [];   // from the Sheet, refreshed on load + poll
 let activeTeam = null;
+let activeRound = null;
 let searchTerm = "";
 let busyRows = new Set();
 
@@ -285,6 +279,7 @@ async function loadAttendees(silent){
     showBanner('');
     setLive('ok', 'synced');
     buildTeamChips();
+    buildRoundChips();
     render();
   }catch(err){
     setLive('err', 'sync failed');
@@ -319,18 +314,50 @@ function highlightChips(){
   });
 }
 
+function buildRoundChips(){
+  // Sort chronologically — "16:30", "17:00" etc. sort correctly as plain strings.
+  const rounds = [...new Set(attendees.map(a => a.round).filter(Boolean))].sort();
+  const wrap = document.getElementById('roundChips');
+  const prevActive = activeRound;
+  wrap.innerHTML = '';
+  const all = document.createElement('button');
+  all.className = 'chip' + (prevActive === null ? ' active' : '');
+  all.textContent = 'All times';
+  all.onclick = () => { activeRound = null; render(); highlightRoundChips(); };
+  wrap.appendChild(all);
+  rounds.forEach(r => {
+    const chip = document.createElement('button');
+    chip.className = 'chip' + (r === prevActive ? ' active' : '');
+    chip.textContent = r;
+    chip.onclick = () => { activeRound = r; render(); highlightRoundChips(); };
+    wrap.appendChild(chip);
+  });
+}
+function highlightRoundChips(){
+  [...document.getElementById('roundChips').children].forEach(c => {
+    const isAll = c.textContent === 'All times';
+    c.classList.toggle('active', isAll ? activeRound === null : c.textContent === activeRound);
+  });
+}
+
 /* ---------- render ---------- */
 function render(){
   const list = document.getElementById('list');
   const q = searchTerm.trim().toLowerCase();
 
-  const filtered = attendees.filter(a => {
-    if (activeTeam && a.team !== activeTeam) return false;
-    if (!q) return true;
-    return a.name.toLowerCase().includes(q)
-        || a.team.toLowerCase().includes(q)
-        || a.details.toLowerCase().includes(q);
-  });
+  const filtered = attendees
+    .filter(a => {
+      if (activeTeam && a.team !== activeTeam) return false;
+      if (activeRound && a.round !== activeRound) return false;
+      if (!q) return true;
+      return a.name.toLowerCase().includes(q)
+          || a.team.toLowerCase().includes(q)
+          || a.details.toLowerCase().includes(q);
+    })
+    .sort((a, b) => {
+      const t = String(a.round).localeCompare(String(b.round));
+      return t !== 0 ? t : a.name.localeCompare(b.name);
+    });
 
   const checkedCount = attendees.filter(a => a.checkedIn).length;
   document.getElementById('countText').textContent = `${checkedCount} / ${attendees.length}`;
